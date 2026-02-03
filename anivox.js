@@ -1,136 +1,183 @@
 (function () {
     'use strict';
 
-    if (window.anivox_online_plugin) return;
-    window.anivox_online_plugin = true;
+    // Защита от повторного запуска
+    if (window.anivox_plugin_loaded) return;
+    window.anivox_plugin_loaded = true;
 
-    const ИМЯ_ИСТОЧНИКА = 'Смотреть AniVox';
     const САЙТ = 'https://anivox.fun';
+    const ИМЯ = 'Смотреть AniVox';
 
-    // Функция запуска
-    function инициализация() {
-        console.log('AniVox: попытка добавить источник в Онлайн');
+    // Стили для красивого вида
+    Lampa.Template.add('anivox_card_style', `
+        <style>
+            .anivox-card {display:flex;background:rgba(0,0,0,0.4);border-radius:0.4em;margin:0.8em 0;overflow:hidden}
+            .anivox-card__poster {width:9em;flex-shrink:0;position:relative}
+            .anivox-card__poster img {width:100%;height:100%;object-fit:cover}
+            .anivox-card__info {padding:1em;flex-grow:1}
+            .anivox-card__title {font-size:1.4em;margin-bottom:0.4em}
+            .anivox-card.focus {box-shadow:0 0 12px #8a4fff}
+        </style>
+    `);
+    $('body').append(Lampa.Template.get('anivox_card_style'));
 
-        let источник = {
-            name: ИМЯ_ИСТОЧНИКА,
-            logo: САЙТ + '/favicon.ico',
+    Lampa.Template.add('anivox_card', `
+        <div class="anivox-card selector">
+            <div class="anivox-card__poster">
+                <img src="{img}" alt="">
+            </div>
+            <div class="anivox-card__info">
+                <div class="anivox-card__title">{title}</div>
+            </div>
+        </div>
+    `);
 
-            search: function (запрос, страница = 1, успех, ошибка) {
-                поиск(запрос, страница).then(успех).catch(ошибка);
-            },
+    Lampa.Template.add('anivox_empty', '<div style="padding:3em;text-align:center;font-size:1.5em">Ничего не найдено</div>');
 
-            get: function (ссылка, успех, ошибка) {
-                получитьПлеер(ссылка).then(успех).catch(ошибка);
-            }
+    // Компонент
+    function anivox_component(данные) {
+        var сеть = new Lampa.Network();
+        var скролл = new Lampa.Scroll({mask:true, over:true});
+        var список = new Lampa.Explorer(данные);
+
+        this.create = function() {
+            скролл.body().append('<div style="padding:1.2em;font-size:1.4em">AniVox · поиск</div>');
+            список.appendFiles(скролл.render());
+            this.поиск();
+            return this.render();
         };
 
-        // Основные способы регистрации (работают в большинстве сборок)
-        if (window.online_ready && typeof window.online_ready === 'function') {
-            window.online_ready(источник);
-            console.log('AniVox: добавлен через online_ready');
-        }
+        this.поиск = function() {
+            let название = (данные.movie.title || данные.movie.name || '') + ' ' + 
+                           (данные.movie.original_title || данные.movie.original_name || '');
 
-        if (Lampa.Manifest && Lampa.Manifest.online) {
-            Lampa.Manifest.online.add(источник);
-            console.log('AniVox: добавлен через Manifest.online');
-        }
+            название = название.trim();
 
-        if (Lampa.Listener) {
-            Lampa.Listener.send('online', 'add_source', источник);
-            console.log('AniVox: добавлен через Listener');
-        }
-
-        // Принудительный способ с задержкой
-        setTimeout(() => {
-            if (Lampa.Component && Lampa.Component.online && Lampa.Component.online.addSource) {
-                Lampa.Component.online.addSource(источник);
-                console.log('AniVox: принудительно добавлен через Component.online');
+            if (!название) {
+                скролл.append(Lampa.Template.get('anivox_empty'));
+                return;
             }
-        }, 4000);
-    }
 
-    // Поиск аниме
-    function поиск(запрос, страница) {
-        return new Promise((готово, ошибка) => {
-            let адрес = запрос 
-                ? `${САЙТ}/index.php?do=search&subaction=search&search_start=0&full_search=0&result_from=1&story=${encodeURIComponent(запрос)}`
-                : `${САЙТ}/page/${страница}/`;
+            let url = `${САЙТ}/index.php?do=search&subaction=search&story=${encodeURIComponent(название)}`;
 
-            запросСети(адрес).then(страница => {
+            сеть.silent(url, (html) => {
                 let $ = Lampa.$;
-                let результаты = [];
+                let элементы = [];
 
-                $(страница).find('.shortstory').each(function () {
+                $(html).find('.shortstory').each(function() {
                     let блок = $(this);
-                    let название = блок.find('.shortstory__title a').text().trim();
-                    let ссылка = блок.find('.shortstory__title a').attr('href');
-                    let постер = блок.find('img').first().attr('src') || '';
+                    let заголовок = блок.find('.shortstory__title a').text().trim();
+                    let ссылка   = блок.find('.shortstory__title a').attr('href');
+                    let картинка = блок.find('img').first().attr('src') || '';
 
-                    if (!название || !ссылка) return;
+                    if (!заголовок || !ссылка) return;
 
-                    if (ссылка.startsWith('/')) ссылка = САЙТ + ссылка;
-                    if (постер && постер.startsWith('/')) постер = САЙТ + постер;
+                    if (ссылка.startsWith('/'))   ссылка   = САЙТ + ссылка;
+                    if (картинка.startsWith('/')) картинка = САЙТ + картинка;
 
-                    результаты.push({
-                        title: название,
-                        original_title: название,
-                        img: постер,
-                        url: ссылка,
-                        source: ИМЯ_ИСТОЧНИКА
+                    элементы.push({
+                        title: заголовок,
+                        url:   ссылка,
+                        img:   картинка || './img/img_broken.svg'
                     });
                 });
 
-                let естьЕщё = $(страница).find('.navigation a.next').length > 0;
+                this.показать_результаты(элементы);
+            }, () => {
+                скролл.append(Lampa.Template.get('anivox_empty'));
+            });
+        };
 
-                готово({
-                    results: результаты,
-                    pagination: { more: естьЕщё }
+        this.показать_результаты = function(массив) {
+            скролл.clear();
+
+            if (!массив.length) {
+                скролл.append(Lampa.Template.get('anivox_empty'));
+                return;
+            }
+
+            массив.forEach(элемент => {
+                let карточка = Lampa.Template.get('anivox_card', элемент);
+
+                карточка.find('img').on('load', function() {
+                    карточка.find('img').addClass('loaded');
+                }).on('error', function() {
+                    this.src = './img/img_broken.svg';
                 });
-            }).catch(ошибка);
-        });
-    }
 
-    // Получение плеера
-    function получитьПлеер(страницаАниме) {
-        return new Promise((готово, ошибка) => {
-            запросСети(страницаАниме).then(страница => {
+                карточка.on('hover:enter', () => {
+                    this.запустить_видео(элемент.url);
+                });
+
+                скролл.append(карточка);
+            });
+        };
+
+        this.запустить_видео = function(страница) {
+            сеть.silent(страница, (html) => {
                 let $ = Lampa.$;
 
-                // Ищем любой iframe плеера
-                let iframe = $('iframe[src*="player"], iframe[src*="kodik"], iframe[src*="video"], iframe[src*="rezka"], iframe[src]');
+                // ищем iframe плеера
+                let плеер = $('iframe[src*="kodik"], iframe[src*="video"], iframe[src*="player"], iframe[src*="anivox"], iframe').first().attr('src');
 
-                if (iframe.length) {
-                    let src = iframe.first().attr('src');
-                    if (src.startsWith('//')) src = 'https:' + src;
-                    if (src.startsWith('/')) src = САЙТ + src;
-
-                    готово(src);
-                } else {
-                    ошибка('Плеер не найден на странице');
+                if (!плеер) {
+                    плеер = $('video source').attr('src') || '';
                 }
-            }).catch(ошибка);
-        });
-    }
 
-    // Запрос к сайту
-    function запросСети(адрес) {
-        return new Promise((готово, ошибка) => {
-            let сеть = new Lampa.Network();
-            сеть.silent(адрес, готово, () => ошибка('Ошибка загрузки'), false, {
-                dataType: 'text',
-                timeout: 15000
+                if (плеер) {
+                    if (плеер.startsWith('//')) плеер = 'https:' + плеер;
+                    if (плеер.startsWith('/'))  плеер = САЙТ + плеер;
+
+                    Lampa.Player.play({
+                        title: 'AniVox · ' + данные.movie.title,
+                        url: плеер
+                    });
+                } else {
+                    Lampa.Noty.show('Не удалось найти плеер на странице');
+                }
+            }, () => {
+                Lampa.Noty.show('Ошибка загрузки страницы аниме');
             });
-        });
+        };
+
+        this.render = function() { return список.render(); };
+
+        this.destroy = function() {
+            сеть.clear();
+            скролл.destroy();
+            список.destroy();
+        };
     }
 
-    // Запуск при готовности Lampa
-    if (window.appready) {
-        инициализация();
-    } else {
-        Lampa.Listener.follow('app', e => {
-            if (e.type === 'ready') инициализация();
-        });
-    }
+    // Регистрируем компонент
+    Lampa.Component.add('anivox', anivox_component);
 
-    console.log('Плагин AniVox для Онлайн загружен');
+    // Кнопка в карточке
+    let кнопка_html = `
+        <div class="full-start__button selector" style="background:#6a48b6;color:#fff">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+            </svg>
+            <span>Смотреть AniVox</span>
+        </div>
+    `;
+
+    Lampa.Listener.follow('full', function(e) {
+        if (e.type === 'complite') {
+            let кнопка = $(кнопка_html);
+
+            кнопка.on('hover:enter', function() {
+                Lampa.Activity.push({
+                    component: 'anivox',
+                    movie: e.data.movie,
+                    title: 'AniVox'
+                });
+            });
+
+            // Добавляем кнопку после основных
+            e.object.activity.render().find('.full-start__buttons').append(кнопка);
+        }
+    });
+
+    console.log('AniVox плагин запущен');
 })();
