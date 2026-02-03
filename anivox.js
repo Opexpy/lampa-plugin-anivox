@@ -6,36 +6,42 @@
 
     // Основная функция инициализации
     function запуститьПлагин() {
-        // Проверяем, что всё нужное уже загрузилось
-        if (!window.Lampa || !Lampa.Manifest || !Lampa.Manifest.online) {
-            console.log('AniVox: ждём полной загрузки компонентов...');
-            setTimeout(запуститьПлагин, 600);
-            return;
-        }
+        console.log('AniVox: попытка регистрации источника');
 
-        console.log('AniVox: регистрация источника');
-
-        // Регистрируем источник современным способом
-        Lampa.Manifest.online.add({
+        let источник = {
             name: SOURCE_NAME,
             logo: SITE_URL + '/favicon.ico',
-            
-            // Поиск
             search: function (запрос, страница = 1, успех, ошибка) {
                 поискАниме(запрос, страница)
                     .then(успех)
                     .catch(ошибка);
             },
-            
-            // Получение видео
             get: function (адрес, успех, ошибка) {
                 получитьСсылкуНаВидео(адрес)
                     .then(успех)
                     .catch(ошибка);
             }
-        });
+        };
 
-        console.log('AniVox: источник добавлен в список');
+        // Способ 1: самый надёжный в большинстве сборок
+        if (window.online_ready && typeof window.online_ready === 'function') {
+            window.online_ready(источник);
+            console.log('AniVox: зарегистрирован через online_ready');
+        }
+
+        // Способ 2: через Listener
+        if (Lampa.Listener) {
+            Lampa.Listener.send('online', 'add_source', источник);
+            console.log('AniVox: зарегистрирован через Listener');
+        }
+
+        // Способ 3: принудительная регистрация с задержкой (если предыдущие не сработали)
+        setTimeout(function () {
+            if (Lampa.Component && Lampa.Component.online && Lampa.Component.online.addSource) {
+                Lampa.Component.online.addSource(источник);
+                console.log('AniVox: принудительная регистрация через Component.online');
+            }
+        }, 5000);
     }
 
     // Функция поиска
@@ -89,14 +95,13 @@
         });
     }
 
-    // Получение прямой ссылки на плеер / видео
+    // Получение ссылки на плеер
     function получитьСсылкуНаВидео(страница) {
         return new Promise((выполнено, провал) => {
             сетевойЗапрос(страница)
                 .then(текстСтраницы => {
                     const $ = Lampa.$;
 
-                    // Ищем iframe (самый частый случай на anivox)
                     let плеер = '';
 
                     const iframe = $('iframe[src*="kodik"], iframe[src*="video"], iframe[src*="player"], iframe[src*="rezka"], iframe[src*="anivox"]');
@@ -111,26 +116,25 @@
                         return выполнен(плеер);
                     }
 
-                    // Пробуем прямую video (редко, но бывает)
                     const видео_тег = $('video source').attr('src');
                     if (видео_тег) {
                         if (видео_тег.startsWith('/')) видео_тег = SITE_URL + видео_тег;
                         return выполнен(видео_тег);
                     }
 
-                    провал('Не найден плеер или видео на странице');
+                    провал('Плеер не найден');
                 })
                 .catch(провал);
         });
     }
 
-    // Универсальный запрос с обработкой ошибок
+    // Сетевой запрос
     function сетевойЗапрос(адрес) {
         return new Promise((выполнено, провал) => {
             const сеть = new Lampa.Network();
             сеть.silent(адрес, выполнен, (ошибка, статус) => {
-                console.log('AniVox: ошибка запроса', статус, ошибка);
-                провал(ошибка || 'Не удалось загрузить страницу');
+                console.log('AniVox: ошибка сети', статус, ошибка);
+                провал(ошибка || 'Ошибка загрузки');
             }, false, {
                 dataType: 'text',
                 timeout: 12000
@@ -138,11 +142,11 @@
         });
     }
 
-    // Запускаем плагин при готовности приложения
+    // Запуск при готовности приложения
     if (window.appready) {
         запуститьПлагин();
     } else {
-        Lampa.Listener.follow('app', функция(e) {
+        Lampa.Listener.follow('app', function (e) {
             if (e.type === 'ready') {
                 запуститьПлагин();
             }
