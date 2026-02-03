@@ -1,147 +1,150 @@
 (function () {
     'use strict';
 
-    const SOURCE_NAME = 'AniVox';
+    const SOURCE_NAME = 'Смотреть AniVox';
     const SITE_URL = 'https://anivox.fun';
 
-    // Ждём полной готовности приложения и компонента online
-    function initPlugin() {
-        if (!window.Lampa || !window.Lampa.Manifest || !Lampa.Manifest.online) {
-            console.log('AniVox: ждём загрузки компонентов...');
-            setTimeout(initPlugin, 500);
+    // Основная функция инициализации
+    function запуститьПлагин() {
+        // Проверяем, что всё нужное уже загрузилось
+        if (!window.Lampa || !Lampa.Manifest || !Lampa.Manifest.online) {
+            console.log('AniVox: ждём полной загрузки компонентов...');
+            setTimeout(запуститьПлагин, 600);
             return;
         }
 
         console.log('AniVox: регистрация источника');
 
-        // Современный способ добавления источника
+        // Регистрируем источник современным способом
         Lampa.Manifest.online.add({
             name: SOURCE_NAME,
             logo: SITE_URL + '/favicon.ico',
-            search: function (query, page = 1, onSuccess, onError) {
-                searchAnime(query, page)
-                    .then(onSuccess)
-                    .catch(onError);
+            
+            // Поиск
+            search: function (запрос, страница = 1, успех, ошибка) {
+                поискАниме(запрос, страница)
+                    .then(успех)
+                    .catch(ошибка);
             },
-            get: function (url, onSuccess, onError) {
-                getVideoUrl(url)
-                    .then(onSuccess)
-                    .catch(onError);
+            
+            // Получение видео
+            get: function (адрес, успех, ошибка) {
+                получитьСсылкуНаВидео(адрес)
+                    .then(успех)
+                    .catch(ошибка);
             }
         });
 
-        console.log('AniVox: источник успешно зарегистрирован');
+        console.log('AniVox: источник добавлен в список');
     }
 
-    // Поиск аниме
-    function searchAnime(query, page) {
-        return new Promise((resolve, reject) => {
-            let url;
+    // Функция поиска
+    function поискАниме(запрос, страница) {
+        return new Promise((выполнено, провал) => {
+            let адрес;
 
-            if (query) {
-                url = `${SITE_URL}/index.php?do=search&subaction=search&search_start=0&full_search=0&result_from=1&story=${encodeURIComponent(query)}`;
+            if (запрос && запрос.trim() !== '') {
+                адрес = `${SITE_URL}/index.php?do=search&subaction=search&search_start=0&full_search=0&result_from=1&story=${encodeURIComponent(запрос)}`;
             } else {
-                url = `${SITE_URL}/page/${page}/`;
+                адрес = `${SITE_URL}/page/${страница}/`;
             }
 
-            networkRequest(url)
-                .then(html => {
+            сетевойЗапрос(адрес)
+                .then(текстСтраницы => {
                     const $ = Lampa.$;
-                    const items = [];
+                    const результаты = [];
 
-                    $(html).find('.shortstory').each(function () {
-                        const el = $(this);
+                    $(текстСтраницы).find('.shortstory').each(function () {
+                        const блок = $(this);
 
-                        let title = el.find('.shortstory__title a').text().trim();
-                        let href = el.find('.shortstory__title a').attr('href');
-                        let poster = el.find('img').first().attr('src') || '';
+                        let название = блок.find('.shortstory__title a').text().trim();
+                        let ссылка = блок.find('.shortstory__title a').attr('href');
+                        let постер = блок.find('img').first().attr('src') || '';
 
-                        if (!title || !href) return;
+                        if (!название || !ссылка) return;
 
-                        if (href.startsWith('/')) href = SITE_URL + href;
-                        if (poster && poster.startsWith('/')) poster = SITE_URL + poster;
+                        if (ссылка.startsWith('/'))   ссылка = SITE_URL + ссылка;
+                        if (постер && постер.startsWith('/')) постер = SITE_URL + постер;
 
-                        items.push({
-                            title: title,
-                            original_title: title,
-                            img: poster,
-                            url: href,
+                        результаты.push({
+                            title: название,
+                            original_title: название,
+                            img: постер,
+                            url: ссылка,
                             source: SOURCE_NAME
                         });
                     });
 
-                    const has_next = $(html).find('.navigation a.next').length > 0;
+                    const есть_ещё = $(текстСтраницы).find('.navigation a.next').length > 0;
 
-                    resolve({
-                        results: items,
+                    выполнен({
+                        results: результаты,
                         pagination: {
-                            more: has_next,
-                            page: page
+                            more: есть_ещё,
+                            page: страница
                         }
                     });
                 })
-                .catch(reject);
+                .catch(провал);
         });
     }
 
-    // Получение ссылки на видео
-    function getVideoUrl(page_url) {
-        return new Promise((resolve, reject) => {
-            networkRequest(page_url)
-                .then(html => {
+    // Получение прямой ссылки на плеер / видео
+    function получитьСсылкуНаВидео(страница) {
+        return new Promise((выполнено, провал) => {
+            сетевойЗапрос(страница)
+                .then(текстСтраницы => {
                     const $ = Lampa.$;
 
-                    // Пытаемся найти iframe плеера
-                    let iframe_src = '';
+                    // Ищем iframe (самый частый случай на anivox)
+                    let плеер = '';
 
-                    // Kodik, HDRezka, VideoCDN и подобные обычно в iframe
-                    const iframes = $('iframe[src*="kodik"], iframe[src*="video"], iframe[src*="player"], iframe[src*="anivox"], iframe[src*="rezka"]');
+                    const iframe = $('iframe[src*="kodik"], iframe[src*="video"], iframe[src*="player"], iframe[src*="rezka"], iframe[src*="anivox"]');
 
-                    if (iframes.length) {
-                        iframe_src = iframes.first().attr('src');
+                    if (iframe.length) {
+                        плеер = iframe.first().attr('src');
                     }
 
-                    // Если нашли — возвращаем
-                    if (iframe_src) {
-                        if (iframe_src.startsWith('//')) iframe_src = 'https:' + iframe_src;
-                        if (iframe_src.startsWith('/')) iframe_src = SITE_URL + iframe_src;
-                        return resolve(iframe_src);
+                    if (плеер) {
+                        if (плеер.startsWith('//')) плеер = 'https:' + плеер;
+                        if (плеер.startsWith('/'))  плеер = SITE_URL + плеер;
+                        return выполнен(плеер);
                     }
 
-                    // Пробуем найти прямую video
-                    const video_src = $('video source').attr('src');
-                    if (video_src) {
-                        if (video_src.startsWith('/')) video_src = SITE_URL + video_src;
-                        return resolve(video_src);
+                    // Пробуем прямую video (редко, но бывает)
+                    const видео_тег = $('video source').attr('src');
+                    if (видео_тег) {
+                        if (видео_тег.startsWith('/')) видео_тег = SITE_URL + видео_тег;
+                        return выполнен(видео_тег);
                     }
 
-                    reject('Не удалось найти плеер или видео');
+                    провал('Не найден плеер или видео на странице');
                 })
-                .catch(reject);
+                .catch(провал);
         });
     }
 
-    // Универсальный запрос
-    function networkRequest(url) {
-        return new Promise((resolve, reject) => {
-            const network = new Lampa.Network();
-            network.silent(url, resolve, (err, status) => {
-                console.log('AniVox ошибка сети:', status, err);
-                reject(err || 'Ошибка сети');
+    // Универсальный запрос с обработкой ошибок
+    function сетевойЗапрос(адрес) {
+        return new Promise((выполнено, провал) => {
+            const сеть = new Lampa.Network();
+            сеть.silent(адрес, выполнен, (ошибка, статус) => {
+                console.log('AniVox: ошибка запроса', статус, ошибка);
+                провал(ошибка || 'Не удалось загрузить страницу');
             }, false, {
                 dataType: 'text',
-                timeout: 10000
+                timeout: 12000
             });
         });
     }
 
-    // Запуск
+    // Запускаем плагин при готовности приложения
     if (window.appready) {
-        initPlugin();
+        запуститьПлагин();
     } else {
-        Lampa.Listener.follow('app', function (e) {
+        Lampa.Listener.follow('app', функция(e) {
             if (e.type === 'ready') {
-                initPlugin();
+                запуститьПлагин();
             }
         });
     }
